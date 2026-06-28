@@ -6,6 +6,26 @@ I2P Observatory / Tunnel Flow Visualizer with a local plugin UI, animated tunnel
 
 > Netherloom turns your I2P router into a living world. A pixel companion grows in real time from your router's actual contribution to the network — tunnels carried, bandwidth shared, uptime.
 
+![Netherloom Observatory showing the tunnel map, router status, and pixel companion](docs/screenshots/observatory.jpg)
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="docs/screenshots/living-atlas.jpg" alt="The Living Atlas skill tree with connected progression branches">
+      <br><sub><strong>Living Atlas</strong> — 75 connected progression nodes across five branches.</sub>
+    </td>
+    <td width="50%">
+      <img src="docs/screenshots/pet-atlas.jpg" alt="Pet Atlas showing collectible pixel companions and the active pet">
+      <br><sub><strong>Pet Atlas</strong> — deterministic companions, affinities, rarities, and per-pet progression.</sub>
+    </td>
+  </tr>
+</table>
+
+> Screenshots are captured from the real local UI. The Observatory above is shown without a
+> connected I2P router, so live router metrics correctly remain at zero.
+
 ## Development
 
 ```bash
