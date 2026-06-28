@@ -335,9 +335,8 @@ export function rollEepsiteRewards(
   level: number,
   bonusCoinMultiplier: number = 1,
 ): EepsiteRewardResult {
-  const levelFactor = 1 + Math.min(0.6, level * 0.012);
-  const baseCoins = Math.round(rollInRange(eepsite.rewards.coinsMin, eepsite.rewards.coinsMax) * levelFactor);
-  const xp = Math.round(rollInRange(eepsite.rewards.xpMin, eepsite.rewards.xpMax) * levelFactor);
+  const baseCoins = rollInRange(eepsite.rewards.coinsMin, eepsite.rewards.coinsMax);
+  const xp = rollInRange(eepsite.rewards.xpMin, eepsite.rewards.xpMax);
 
   let careItemId: string | undefined;
   if (eepsite.rewards.careItemChance && eepsite.rewards.dropPool && eepsite.rewards.dropPool.length > 0) {

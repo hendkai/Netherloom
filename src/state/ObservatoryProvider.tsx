@@ -1249,6 +1249,26 @@ export function ObservatoryProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  useEffect(() => {
+    const currentLevel = levelForXp(Math.floor(progressRef.current.totalXp));
+    const expected = currentLevel;
+    if (skillsRef.current.pointsEarned >= expected) return;
+    const next: SkillsSave = {
+      unlocked: skillsRef.current.unlocked,
+      pointsEarned: expected,
+    };
+    skillsRef.current = next;
+    setSkills(next);
+    persistSkills(next);
+    pushActivity([{
+      id: makeActivityId(Date.now()),
+      at: Date.now(),
+      category: "system",
+      title: `Skill points backfilled: +${expected - 0}`,
+      detail: `Normalized to level ${currentLevel} (${expected} points total).`,
+    }]);
+  }, [pushActivity]);
+
   const setView = useCallback((view: ViewId) => {
     setActiveView(view);
     setNotificationsOpen(false);

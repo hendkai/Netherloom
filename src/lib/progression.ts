@@ -53,7 +53,7 @@ export function suggestCreatures(count = 3, exclude: string[] = []): string[] {
 // --- Level curve ----------------------------------------------------------
 
 const XP_BASE = 100;
-const XP_EXP = 1.6;
+const XP_EXP = 2.5;
 
 /** Cumulative XP required to *reach* a given level (level 0 = 0 XP). */
 export function xpForLevel(level: number): number {

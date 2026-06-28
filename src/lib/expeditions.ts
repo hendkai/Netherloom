@@ -236,9 +236,8 @@ export function rollExpeditionRewards(
   level: number,
   bonusCoinMultiplier: number = 1,
 ): ExpeditionRewardResult {
-  const levelFactor = 1 + Math.min(0.5, level * 0.01);
-  const baseCoins = Math.round(rollInRange(expedition.rewards.coinsMin, expedition.rewards.coinsMax) * levelFactor);
-  const xp = Math.round(rollInRange(expedition.rewards.xpMin, expedition.rewards.xpMax) * levelFactor);
+  const baseCoins = rollInRange(expedition.rewards.coinsMin, expedition.rewards.coinsMax);
+  const xp = rollInRange(expedition.rewards.xpMin, expedition.rewards.xpMax);
 
   let careItemId: string | undefined;
   if (expedition.rewards.careItemChance && Math.random() < expedition.rewards.careItemChance) {
