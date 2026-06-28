@@ -778,6 +778,14 @@ button {
   background: rgba(10, 17, 32, 0.6);
   border: 1px solid var(--border);
   font-size: 10px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.version-tag:hover {
+  border-color: rgba(122, 90, 255, 0.5);
+  background: rgba(122, 90, 255, 0.08);
 }
 
 .version-tag strong {
@@ -808,6 +816,26 @@ button {
 .version-dot[data-mode="dev"] {
   background: #ffb24d;
   box-shadow: 0 0 6px rgba(255, 178, 77, 0.5);
+}
+
+.settings-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: rgba(10, 17, 32, 0.6);
+  color: #c4cedd;
+  font-size: 12px;
+  text-decoration: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.settings-link:hover {
+  border-color: rgba(122, 90, 255, 0.5);
+  background: rgba(122, 90, 255, 0.1);
+  color: #d8c8ff;
 }
 
 .mode-box {

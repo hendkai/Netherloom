@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Download, Upload, FolderOpen } from "lucide-react";
+import { Bug, Download, ExternalLink, FolderOpen, Github, Upload } from "lucide-react";
 import { useObservatory, type Mode, type Theme } from "../state/ObservatoryProvider";
 import { exportSave, importSave, getActiveSlot, setActiveSlot } from "../lib/saves";
 
@@ -250,6 +250,28 @@ export function SettingsView() {
         {importMsg ? (
           <p className={`conn-result ${importMsg.ok ? "ok" : "error"}`}>{importMsg.text}</p>
         ) : null}
+      </div>
+
+      <div className="metric-panel settings-form">
+        <span className="view-label">Feedback &amp; Links</span>
+        <p className="settings-hint">
+          Netherloom is free and open-source under AGPL-3.0. Found a bug, have an idea, or want to contribute?
+        </p>
+        <div className="settings-actions">
+          <a className="settings-link" href="https://github.com/hendkai/Netherloom/issues/new" target="_blank" rel="noopener noreferrer">
+            <Bug size={15} /> Report a bug / Request a feature
+          </a>
+          <a className="settings-link" href="https://github.com/hendkai/Netherloom/issues" target="_blank" rel="noopener noreferrer">
+            <ExternalLink size={15} /> Browse issues
+          </a>
+          <a className="settings-link" href="https://github.com/hendkai/Netherloom" target="_blank" rel="noopener noreferrer">
+            <Github size={15} /> Source code
+          </a>
+        </div>
+        <p className="settings-hint">
+          Licensed under <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener noreferrer">AGPL-3.0-or-later</a>.
+          No accounts, no payments, no remote servers.
+        </p>
       </div>
     </section>
   );

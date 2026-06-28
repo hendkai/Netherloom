@@ -189,11 +189,17 @@ function Sidebar() {
         </span>
       </div>
 
-      <div className="version-tag" title={pluginAvailable ? "Running as I2P plugin" : "Running in dev / standalone mode"}>
+      <a
+        className="version-tag"
+        href="https://github.com/hendkai/Netherloom"
+        target="_blank"
+        rel="noopener noreferrer"
+        title={pluginAvailable ? "Running as I2P plugin — click for source code" : "Running in dev / standalone — click for source code"}
+      >
         <span className="version-dot" data-mode={pluginAvailable ? "plugin" : "dev"} />
         <strong>Netherloom v{__APP_VERSION__}</strong>
         <small>{pluginAvailable ? "plugin" : "dev"}</small>
-      </div>
+      </a>
     </aside>
   );
 }
