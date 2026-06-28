@@ -1,0 +1,39 @@
+{
+  "name": "netherloom",
+  "version": "0.1.0",
+  "description": "I2P Observatory / Tunnel Flow Visualizer with pet progression, auto-combat world bosses, expeditions, eepsite exploration, and an I2P plugin package.",
+  "license": "AGPL-3.0-or-later",
+  "author": "Hendrik Kai",
+  "homepage": "https://github.com/hendkai/Netherloom",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hendkai/Netherloom.git"
+  },
+  "bugs": {
+    "url": "https://github.com/hendkai/Netherloom/issues"
+  },
+  "keywords": ["i2p", "privacy", "tamagotchi", "idle-game", "pixel-art", "router-monitor", "plugin"],
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "generate:pet-variants": "python3 scripts/generate-pet-variants.py",
+    "build": "tsc -b && vite build",
+    "build:server": "node scripts/build-server.mjs",
+    "build:plugin": "npm run build && npm run build:server && node scripts/build-plugin.mjs",
+    "install:plugin:dev": "npm run build:plugin && node scripts/install-dev-plugin.mjs",
+    "validate:plugin": "node scripts/validate-plugin.mjs",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "typescript": "^6.0.3",
+    "vite": "^8.1.0"
+  }
+}

@@ -1,0 +1,12 @@
+node_modules/
+dist/
+build/
+dist-plugin/
+*.tsbuildinfo
+vite.config.d.ts
+vite.config.js
+.claude/
+.omo/
+.playwright-mcp/
+.remember/
+tmp/
