@@ -104,8 +104,6 @@ import {
   type EepsiteSave,
 } from "../lib/eepsites";
 import {
-  appendActivity,
-  createActivityLog,
   makeActivityId,
   type ActivityEntry,
   type ActivityLog,
@@ -142,12 +140,9 @@ import {
 import {
   DEFAULT_AUTO_CARE,
   DEFAULT_SETTINGS,
-  MAX_ROUTER_EVENTS,
-  REACTION_SRC,
   loadAchievements,
   loadActivityLog,
   loadActiveBossId,
-  loadAutoCare,
   loadBossSave,
   loadCare,
   loadCreature,
@@ -156,13 +151,11 @@ import {
   loadExpeditions,
   loadProgress,
   loadQuests,
-  loadRouterEvents,
   loadSettings,
   loadSkills,
   persistAchievements,
   persistActivityLog,
   persistActiveBossId,
-  persistAutoCare,
   persistBossSave,
   persistCare,
   persistCreature,
@@ -171,11 +164,8 @@ import {
   persistExpeditions,
   persistProgress,
   persistQuests,
-  persistRouterEvents,
   persistSkills,
-  readGuideSeen,
   readLastSeen,
-  writeGuideSeen,
   writeLastSeen,
 } from "./savePersistence";
 import type {
@@ -187,6 +177,8 @@ import type {
 } from "./savePersistence";
 
 export type { AutoCareSettings, Mode, Settings, SkillsSave, Theme };
+import { useSessionUi, type Reaction, type OfflineSummary } from "./useSessionUi";
+export type { Reaction, OfflineSummary };
 
 export type ViewId =
   | "Observatory"
@@ -215,12 +207,6 @@ export interface Series {
   outbound: number[]; // MB/s
   tunnels: number[]; // count
   peers: number[]; // active peers
-}
-
-export interface Reaction {
-  id: number;
-  src: string;
-  name: string;
 }
 
 export type ConnectionTest =
@@ -345,15 +331,6 @@ interface ObservatoryContextValue {
 
 const ObservatoryContext = createContext<ObservatoryContextValue | null>(null);
 
-export interface OfflineSummary {
-  awayMs: number;
-  expeditionsClaimed: number;
-  eepsitesClaimed: number;
-  bossDamage: number;
-  bossDefeats: number;
-  rewardsGained: { coins: number; xp: number; items: number };
-}
-
 const OFFLINE_BOSS_CAP_HOURS = 1;
 
 export function ObservatoryProvider({ children }: { children: ReactNode }) {
@@ -373,11 +350,34 @@ export function ObservatoryProvider({ children }: { children: ReactNode }) {
   const [replayPos, setReplayPosState] = useState(1);
   const [replayPlaying, setReplayPlaying] = useState(false);
   const [creature, setCreature] = useState<CreatureSave | null>(loadCreature);
+  const offlineProcessedRef = useRef(false);
+  const session = useSessionUi(creature);
+  const {
+    activityLog,
+    pushActivity,
+    clearActivity,
+    autoCare,
+    setAutoCare,
+    offlineSummary,
+    setOfflineSummary,
+    dismissOfflineSummary,
+    guideSeen,
+    guideOpen,
+    markGuideSeen,
+    setGuideOpen,
+    reactions,
+    setReactions,
+    routerEvents,
+    setRouterEvents,
+    recordRouterEvents,
+  } = session;
+  const autoCareRef = useRef(autoCare);
+  autoCareRef.current = autoCare;
+  const sourceRef = useRef<DataSource>("disconnected");
+  const liveMetricsRef = useRef<RouterMetrics | null>(null);
   const [progress, setProgress] = useState<ProgressSave>(loadProgress);
   const progressRef = useRef(progress);
   progressRef.current = progress;
-  const [reactions, setReactions] = useState<Reaction[]>([]);
-  const [routerEvents, setRouterEvents] = useState<RouterEvent[]>(loadRouterEvents);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [connectionTest, setConnectionTest] = useState<ConnectionTest>({ state: "idle" });
 
@@ -422,59 +422,6 @@ export function ObservatoryProvider({ children }: { children: ReactNode }) {
   const eepsitesByPetRef = useRef(eepsitesByPet);
   eepsitesByPetRef.current = eepsitesByPet;
 
-  const [activityLog, setActivityLog] = useState<ActivityLog>(loadActivityLog);
-  const activityLogRef = useRef(activityLog);
-  activityLogRef.current = activityLog;
-
-  const [autoCare, setAutoCareState] = useState<AutoCareSettings>(loadAutoCare);
-  const autoCareRef = useRef(autoCare);
-  autoCareRef.current = autoCare;
-
-  const [offlineSummary, setOfflineSummary] = useState<OfflineSummary | null>(null);
-  const offlineProcessedRef = useRef(false);
-
-  const [guideSeen, setGuideSeenState] = useState<boolean>(readGuideSeen);
-  const [guideOpen, setGuideOpenState] = useState(false);
-
-  const markGuideSeen = useCallback(() => {
-    setGuideSeenState(true);
-    writeGuideSeen();
-  }, []);
-
-  const setGuideOpen = useCallback((open: boolean) => {
-    setGuideOpenState(open);
-    if (open) {
-      setGuideSeenState(true);
-      writeGuideSeen();
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!creature) return;
-    if (guideSeen) return;
-    const startedAt = creature.createdAt;
-    if (Date.now() - startedAt > 5000) return;
-    setGuideOpenState(true);
-    writeGuideSeen();
-  }, [creature, guideSeen]);
-
-  const pushActivity = useCallback((entries: ActivityEntry | ActivityEntry[]) => {
-    const incoming = Array.isArray(entries) ? entries : [entries];
-    if (incoming.length === 0) return;
-    const stamped = incoming.map((e) => ({ ...e, at: e.at || Date.now(), id: e.id || makeActivityId(e.at || Date.now()) }));
-    const next = appendActivity(activityLogRef.current, stamped);
-    activityLogRef.current = next;
-    setActivityLog(next);
-    persistActivityLog(next);
-  }, []);
-
-  const clearActivity = useCallback(() => {
-    const empty = createActivityLog();
-    activityLogRef.current = empty;
-    setActivityLog(empty);
-    persistActivityLog(empty);
-  }, []);
-
   const awardSkillPointsForDelta = useCallback((beforeXp: number, afterXp: number) => {
     const oldLevel = levelForXp(Math.floor(beforeXp));
     const newLevel = levelForXp(Math.floor(afterXp));
@@ -498,65 +445,6 @@ export function ObservatoryProvider({ children }: { children: ReactNode }) {
     }]);
   }, [pushActivity]);
 
-  const setAutoCare = useCallback((next: AutoCareSettings) => {
-    const clean: AutoCareSettings = {
-      enabled: next.enabled,
-      feedThreshold: Math.max(0, Math.min(80, Math.round(next.feedThreshold))),
-      cleanThreshold: Math.max(0, Math.min(80, Math.round(next.cleanThreshold))),
-      playThreshold: Math.max(0, Math.min(80, Math.round(next.playThreshold))),
-    };
-    autoCareRef.current = clean;
-    setAutoCareState(clean);
-    persistAutoCare(clean);
-  }, []);
-
-  const dismissOfflineSummary = useCallback(() => setOfflineSummary(null), []);
-
-  const reactionId = useRef(0);
-  const routerEventId = useRef(0);
-  const sourceRef = useRef<DataSource>("disconnected");
-  const liveMetricsRef = useRef<RouterMetrics | null>(null);
-  const recentEventKeysRef = useRef(new Map<string, number>());
-
-  const recordRouterEvents = useCallback((drafts: RouterEventDraft[]) => {
-    if (drafts.length === 0) return;
-    const now = Date.now();
-    const created: RouterEvent[] = [];
-
-    for (const draft of drafts) {
-      const eventKey = `${draft.kind}:${draft.title}`;
-      const previousAt = recentEventKeysRef.current.get(eventKey) ?? 0;
-      if (now - previousAt < 20_000) continue;
-      const reactionSrc = REACTION_SRC.get(draft.reaction);
-      if (!reactionSrc) continue;
-      recentEventKeysRef.current.set(eventKey, now);
-      created.push({
-        ...draft,
-        id: `${now}-${routerEventId.current += 1}`,
-        timestamp: now,
-        reactionSrc,
-      });
-    }
-
-    if (created.length === 0) return;
-    setRouterEvents((previous) => {
-      const next = [...created.reverse(), ...previous].slice(0, MAX_ROUTER_EVENTS);
-      persistRouterEvents(next);
-      return next;
-    });
-
-    for (const event of created) {
-      const id = (reactionId.current += 1);
-      setReactions((previous) => [...previous, {
-        id,
-        src: event.reactionSrc,
-        name: event.reaction,
-      }]);
-      window.setTimeout(() => {
-        setReactions((previous) => previous.filter((reaction) => reaction.id !== id));
-      }, 2600);
-    }
-  }, []);
 
   // Plugin health: only "ready" when we get a genuine JSON {ok:true} response.
   useEffect(() => {
@@ -1939,6 +1827,7 @@ export function ObservatoryProvider({ children }: { children: ReactNode }) {
     : 0;
 
   const value: ObservatoryContextValue = {
+    ...session,
     metrics,
     source,
     pluginAvailable,
@@ -1961,8 +1850,6 @@ export function ObservatoryProvider({ children }: { children: ReactNode }) {
     creatureFilter,
     progression,
     onboardingNeeded: creature === null,
-    reactions,
-    routerEvents,
     notificationsOpen,
     settings,
     connectionTest,
@@ -2041,17 +1928,6 @@ export function ObservatoryProvider({ children }: { children: ReactNode }) {
     useCareItemOnBoss,
     setActiveBoss,
     bossAttackReadyAt: bossAttackReadyAtValue,
-    activityLog,
-    pushActivity,
-    clearActivity,
-    offlineSummary,
-    dismissOfflineSummary,
-    autoCare,
-    setAutoCare,
-    guideSeen,
-    markGuideSeen,
-    guideOpen,
-    setGuideOpen,
   };
 
   return <ObservatoryContext.Provider value={value}>{children}</ObservatoryContext.Provider>;
