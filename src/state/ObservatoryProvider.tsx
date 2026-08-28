@@ -15,7 +15,6 @@ import {
   type RouterMetrics,
 } from "../lib/observatory";
 import { fetchPeers, type PeerCreature } from "../lib/peers";
-import { slotKey } from "../lib/saves";
 import {
   createQuestState,
   deriveQuests,
@@ -108,7 +107,6 @@ import {
   appendActivity,
   createActivityLog,
   makeActivityId,
-  sanitizeActivityLog,
   type ActivityEntry,
   type ActivityLog,
 } from "../lib/activityLog";
@@ -134,7 +132,6 @@ import {
   needsEvolutionChoice,
   type EvolutionPath,
 } from "../lib/progression";
-import { emoteSprites } from "../data";
 import {
   connectionLostEvent,
   deriveRouterEvents,
@@ -142,6 +139,54 @@ import {
   type RouterEvent,
   type RouterEventDraft,
 } from "../lib/routerEvents";
+import {
+  DEFAULT_AUTO_CARE,
+  DEFAULT_SETTINGS,
+  MAX_ROUTER_EVENTS,
+  REACTION_SRC,
+  loadAchievements,
+  loadActivityLog,
+  loadActiveBossId,
+  loadAutoCare,
+  loadBossSave,
+  loadCare,
+  loadCreature,
+  loadEconomy,
+  loadEepsites,
+  loadExpeditions,
+  loadProgress,
+  loadQuests,
+  loadRouterEvents,
+  loadSettings,
+  loadSkills,
+  persistAchievements,
+  persistActivityLog,
+  persistActiveBossId,
+  persistAutoCare,
+  persistBossSave,
+  persistCare,
+  persistCreature,
+  persistEconomy,
+  persistEepsites,
+  persistExpeditions,
+  persistProgress,
+  persistQuests,
+  persistRouterEvents,
+  persistSkills,
+  readGuideSeen,
+  readLastSeen,
+  writeGuideSeen,
+  writeLastSeen,
+} from "./savePersistence";
+import type {
+  AutoCareSettings,
+  Mode,
+  Settings,
+  SkillsSave,
+  Theme,
+} from "./savePersistence";
+
+export type { AutoCareSettings, Mode, Settings, SkillsSave, Theme };
 
 export type ViewId =
   | "Observatory"
@@ -163,16 +208,7 @@ export type ViewId =
   | "Activity"
   | "Settings";
 
-export type Mode = "Living" | "Technical";
-export type Theme = "Dark" | "Light";
 export type TimeWindow = "1m" | "5m" | "1h";
-
-export interface Settings {
-  password: string;
-  pollSeconds: number;
-  defaultMode: Mode;
-  theme: Theme;
-}
 
 export interface Series {
   inbound: number[]; // MB/s
@@ -309,285 +345,6 @@ interface ObservatoryContextValue {
 
 const ObservatoryContext = createContext<ObservatoryContextValue | null>(null);
 
-const SETTINGS_KEY = "netherloom.settings"; // device-level, shared across save slots
-const NAME_KEY = slotKey("creatureName");
-const CREATURE_KEY = slotKey("creature");
-const PROGRESS_KEY = slotKey("progress");
-const HISTORY_LENGTH = 3600;
-const ROUTER_EVENTS_KEY = slotKey("routerEvents");
-const MAX_ROUTER_EVENTS = 50;
-const REACTION_SRC = new Map(emoteSprites.map((emote) => [emote.name, emote.src]));
-
-const DEFAULT_SETTINGS: Settings = {
-  password: "itoopie", // prefill only — set your real password at http://127.0.0.1:7657/jsonrpc/ (itoopie until changed)
-  pollSeconds: 5,
-  defaultMode: "Living",
-  theme: "Dark",
-};
-
-function loadSettings(): Settings {
-  try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return DEFAULT_SETTINGS;
-    const parsed = JSON.parse(raw) as Partial<Settings>;
-    return {
-      password: typeof parsed.password === "string" ? parsed.password : DEFAULT_SETTINGS.password,
-      pollSeconds:
-        typeof parsed.pollSeconds === "number" && parsed.pollSeconds >= 1
-          ? parsed.pollSeconds
-          : DEFAULT_SETTINGS.pollSeconds,
-      defaultMode: parsed.defaultMode === "Technical" ? "Technical" : "Living",
-      theme: parsed.theme === "Light" ? "Light" : "Dark",
-    };
-  } catch {
-    return DEFAULT_SETTINGS;
-  }
-}
-
-function loadCreature(): CreatureSave | null {
-  try {
-    const raw = localStorage.getItem(CREATURE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<CreatureSave>;
-    if (!parsed.id) return null;
-    return {
-      id: parsed.id,
-      name: typeof parsed.name === "string" && parsed.name ? parsed.name : displayCreatureName(parsed.id),
-      createdAt: typeof parsed.createdAt === "number" ? parsed.createdAt : Date.now(),
-    };
-  } catch {
-    return null;
-  }
-}
-
-function loadProgress(): ProgressSave {
-  try {
-    const raw = localStorage.getItem(PROGRESS_KEY);
-    if (!raw) return { ...INITIAL_PROGRESS, lastTickAt: Date.now() };
-    const parsed = JSON.parse(raw) as Partial<ProgressSave>;
-    return {
-      totalXp: Number(parsed.totalXp) || 0,
-      sharedBytes: Number(parsed.sharedBytes) || 0,
-      lastTickAt: Date.now(),
-    };
-  } catch {
-    return { ...INITIAL_PROGRESS, lastTickAt: Date.now() };
-  }
-}
-
-function persistProgress(progress: ProgressSave) {
-  try {
-    localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
-  } catch {
-    /* ignore storage errors */
-  }
-}
-
-const SKILLS_KEY = slotKey("skills");
-const ACHIEVEMENTS_KEY = slotKey("achievements");
-const ECONOMY_KEY = slotKey("economy");
-const QUESTS_KEY = slotKey("quests");
-const CARE_KEY = slotKey("care");
-
-function loadQuests(): QuestState | null {
-  try {
-    const raw = localStorage.getItem(QUESTS_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<QuestState>;
-    if (!parsed.dayKey || !parsed.weekKey || !parsed.dailyBaseline || !parsed.weeklyBaseline) return null;
-    return {
-      dayKey: parsed.dayKey,
-      weekKey: parsed.weekKey,
-      dailyBaseline: parsed.dailyBaseline,
-      weeklyBaseline: parsed.weeklyBaseline,
-      claimed: Array.isArray(parsed.claimed) ? parsed.claimed.filter((x): x is string => typeof x === "string") : [],
-    };
-  } catch {
-    return null;
-  }
-}
-
-function persistQuests(state: QuestState) {
-  try {
-    localStorage.setItem(QUESTS_KEY, JSON.stringify(state));
-  } catch {
-    /* ignore storage errors */
-  }
-}
-
-function loadCare(): Record<string, CareStats> {
-  try {
-    const raw = localStorage.getItem(CARE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as { pets?: Record<string, Partial<CareStats>> };
-    const pets = parsed.pets && typeof parsed.pets === "object" ? parsed.pets : {};
-    const result: Record<string, CareStats> = {};
-    for (const [petId, stats] of Object.entries(pets)) {
-      if (typeof petId !== "string") continue;
-      result[petId] = sanitizeCareStats(stats);
-    }
-    return result;
-  } catch {
-    return {};
-  }
-}
-
-function persistCare(careByPet: Record<string, CareStats>) {
-  try {
-    localStorage.setItem(CARE_KEY, JSON.stringify({ pets: careByPet }));
-  } catch {
-    /* ignore storage errors */
-  }
-}
-
-const EXPED_KEY = slotKey("expeditions");
-
-function loadExpeditions(): Record<string, ExpeditionSave> {
-  try {
-    const raw = localStorage.getItem(EXPED_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as { pets?: Record<string, Partial<ExpeditionSave>> };
-    const pets = parsed.pets && typeof parsed.pets === "object" ? parsed.pets : {};
-    const result: Record<string, ExpeditionSave> = {};
-    for (const [petId, save] of Object.entries(pets)) {
-      if (typeof petId !== "string") continue;
-      result[petId] = sanitizeExpeditionSave(save);
-    }
-    return result;
-  } catch {
-    return {};
-  }
-}
-
-function persistExpeditions(byPet: Record<string, ExpeditionSave>) {
-  try {
-    localStorage.setItem(EXPED_KEY, JSON.stringify({ pets: byPet }));
-  } catch {
-    /* ignore storage errors */
-  }
-}
-
-const BOSS_KEY = slotKey("bosses");
-const ACTIVE_BOSS_KEY = slotKey("activeBoss");
-
-function loadBossSave(): BossSave {
-  try {
-    const raw = localStorage.getItem(BOSS_KEY);
-    if (!raw) return createBossSave();
-    return sanitizeBossSave(JSON.parse(raw) as Partial<BossSave>);
-  } catch {
-    return createBossSave();
-  }
-}
-
-function persistBossSave(save: BossSave) {
-  try {
-    localStorage.setItem(BOSS_KEY, JSON.stringify(save));
-  } catch {
-    /* ignore storage errors */
-  }
-}
-
-function loadActiveBossId(save: BossSave): string {
-  try {
-    const stored = localStorage.getItem(ACTIVE_BOSS_KEY);
-    if (stored && save[stored]?.unlocked) return stored;
-  } catch {
-    /* ignore storage errors */
-  }
-  const firstUnlocked = BOSSES.find((b) => save[b.id]?.unlocked);
-  return firstUnlocked?.id ?? BOSSES[0].id;
-}
-
-const EEPSITE_KEY = slotKey("eepsites");
-
-function loadEepsites(): Record<string, EepsiteSave> {
-  try {
-    const raw = localStorage.getItem(EEPSITE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as { pets?: Record<string, Partial<EepsiteSave>> };
-    const pets = parsed.pets && typeof parsed.pets === "object" ? parsed.pets : {};
-    const result: Record<string, EepsiteSave> = {};
-    for (const [petId, save] of Object.entries(pets)) {
-      if (typeof petId !== "string") continue;
-      result[petId] = sanitizeEepsiteSave(save);
-    }
-    return result;
-  } catch {
-    return {};
-  }
-}
-
-function persistEepsites(byPet: Record<string, EepsiteSave>) {
-  try {
-    localStorage.setItem(EEPSITE_KEY, JSON.stringify({ pets: byPet }));
-  } catch {
-    /* ignore storage errors */
-  }
-}
-
-const ACTIVITY_KEY = slotKey("activity");
-
-function loadActivityLog(): ActivityLog {
-  try {
-    const raw = localStorage.getItem(ACTIVITY_KEY);
-    if (!raw) return createActivityLog();
-    return sanitizeActivityLog(JSON.parse(raw));
-  } catch {
-    return createActivityLog();
-  }
-}
-
-function persistActivityLog(log: ActivityLog) {
-  try {
-    localStorage.setItem(ACTIVITY_KEY, JSON.stringify(log));
-  } catch {
-    /* ignore storage errors */
-  }
-}
-
-const LAST_SEEN_KEY = slotKey("lastSeen");
-const AUTO_CARE_KEY = slotKey("autoCare");
-const GUIDE_SEEN_KEY = slotKey("guideSeen");
-
-export interface AutoCareSettings {
-  enabled: boolean;
-  feedThreshold: number;
-  cleanThreshold: number;
-  playThreshold: number;
-}
-
-const DEFAULT_AUTO_CARE: AutoCareSettings = {
-  enabled: false,
-  feedThreshold: 25,
-  cleanThreshold: 25,
-  playThreshold: 25,
-};
-
-function loadAutoCare(): AutoCareSettings {
-  try {
-    const raw = localStorage.getItem(AUTO_CARE_KEY);
-    if (!raw) return DEFAULT_AUTO_CARE;
-    const parsed = JSON.parse(raw) as Partial<AutoCareSettings>;
-    return {
-      enabled: parsed.enabled === true,
-      feedThreshold: Math.max(0, Math.min(80, Number(parsed.feedThreshold) || DEFAULT_AUTO_CARE.feedThreshold)),
-      cleanThreshold: Math.max(0, Math.min(80, Number(parsed.cleanThreshold) || DEFAULT_AUTO_CARE.cleanThreshold)),
-      playThreshold: Math.max(0, Math.min(80, Number(parsed.playThreshold) || DEFAULT_AUTO_CARE.playThreshold)),
-    };
-  } catch {
-    return DEFAULT_AUTO_CARE;
-  }
-}
-
-function persistAutoCare(settings: AutoCareSettings) {
-  try {
-    localStorage.setItem(AUTO_CARE_KEY, JSON.stringify(settings));
-  } catch {
-    /* ignore storage errors */
-  }
-}
-
 export interface OfflineSummary {
   awayMs: number;
   expeditionsClaimed: number;
@@ -598,98 +355,6 @@ export interface OfflineSummary {
 }
 
 const OFFLINE_BOSS_CAP_HOURS = 1;
-
-export interface SkillsSave {
-  unlocked: string[];
-  pointsEarned: number;
-}
-
-const EMPTY_SKILLS: SkillsSave = { unlocked: [], pointsEarned: 0 };
-
-function loadSkills(): SkillsSave {
-  try {
-    const raw = localStorage.getItem(SKILLS_KEY);
-    if (!raw) return EMPTY_SKILLS;
-    const parsed = JSON.parse(raw) as Partial<SkillsSave>;
-    return {
-      unlocked: Array.isArray(parsed.unlocked)
-        ? parsed.unlocked.filter((x): x is string => typeof x === "string")
-        : [],
-      pointsEarned: Number(parsed.pointsEarned) || 0,
-    };
-  } catch {
-    return EMPTY_SKILLS;
-  }
-}
-
-function persistSkills(skills: SkillsSave) {
-  try { localStorage.setItem(SKILLS_KEY, JSON.stringify(skills)); } catch { /* ignore storage errors */ }
-}
-
-function loadAchievements(): string[] {
-  try {
-    const raw = localStorage.getItem(ACHIEVEMENTS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as { unlocked?: unknown };
-    return Array.isArray(parsed.unlocked)
-      ? parsed.unlocked.filter((x): x is string => typeof x === "string")
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function persistAchievements(unlocked: string[]) {
-  try { localStorage.setItem(ACHIEVEMENTS_KEY, JSON.stringify({ unlocked })); } catch { /* ignore storage errors */ }
-}
-
-function loadEconomy(): EconomySave {
-  const currentPet = loadCreature()?.id;
-  try {
-    const raw = localStorage.getItem(ECONOMY_KEY);
-    if (!raw) return createEconomy(currentPet);
-    return sanitizeEconomy(JSON.parse(raw) as Partial<EconomySave>, currentPet);
-  } catch {
-    return createEconomy(currentPet);
-  }
-}
-
-function persistEconomy(economy: EconomySave) {
-  try { localStorage.setItem(ECONOMY_KEY, JSON.stringify(economy)); } catch { /* ignore storage errors */ }
-}
-
-function loadRouterEvents(): RouterEvent[] {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(ROUTER_EVENTS_KEY) ?? "[]") as Partial<RouterEvent>[];
-    if (!Array.isArray(parsed)) return [];
-    return parsed.flatMap((event) => {
-      if (
-        typeof event.id !== "string"
-        || typeof event.timestamp !== "number"
-        || typeof event.kind !== "string"
-        || typeof event.severity !== "string"
-        || typeof event.title !== "string"
-        || typeof event.detail !== "string"
-        || typeof event.reaction !== "string"
-      ) {
-        return [];
-      }
-      const reactionSrc = REACTION_SRC.get(event.reaction);
-      return reactionSrc ? [{ ...event, reactionSrc } as RouterEvent] : [];
-    }).slice(0, MAX_ROUTER_EVENTS);
-  } catch {
-    return [];
-  }
-}
-
-function persistRouterEvents(events: RouterEvent[]) {
-  try {
-    const stored = events.map(({ reactionSrc: _reactionSrc, ...event }) => event);
-    localStorage.setItem(ROUTER_EVENTS_KEY, JSON.stringify(stored));
-  } catch {
-    /* ignore storage errors */
-  }
-}
 
 export function ObservatoryProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<Settings>(loadSettings);
@@ -768,33 +433,19 @@ export function ObservatoryProvider({ children }: { children: ReactNode }) {
   const [offlineSummary, setOfflineSummary] = useState<OfflineSummary | null>(null);
   const offlineProcessedRef = useRef(false);
 
-  const [guideSeen, setGuideSeenState] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(GUIDE_SEEN_KEY) === "1";
-    } catch {
-      return false;
-    }
-  });
+  const [guideSeen, setGuideSeenState] = useState<boolean>(readGuideSeen);
   const [guideOpen, setGuideOpenState] = useState(false);
 
   const markGuideSeen = useCallback(() => {
     setGuideSeenState(true);
-    try {
-      localStorage.setItem(GUIDE_SEEN_KEY, "1");
-    } catch {
-      /* ignore storage errors */
-    }
+    writeGuideSeen();
   }, []);
 
   const setGuideOpen = useCallback((open: boolean) => {
     setGuideOpenState(open);
     if (open) {
       setGuideSeenState(true);
-      try {
-        localStorage.setItem(GUIDE_SEEN_KEY, "1");
-      } catch {
-        /* ignore storage errors */
-      }
+      writeGuideSeen();
     }
   }, []);
 
@@ -804,11 +455,7 @@ export function ObservatoryProvider({ children }: { children: ReactNode }) {
     const startedAt = creature.createdAt;
     if (Date.now() - startedAt > 5000) return;
     setGuideOpenState(true);
-    try {
-      localStorage.setItem(GUIDE_SEEN_KEY, "1");
-    } catch {
-      /* ignore storage errors */
-    }
+    writeGuideSeen();
   }, [creature, guideSeen]);
 
   const pushActivity = useCallback((entries: ActivityEntry | ActivityEntry[]) => {
@@ -1080,14 +727,8 @@ export function ObservatoryProvider({ children }: { children: ReactNode }) {
     if (offlineProcessedRef.current) return;
     offlineProcessedRef.current = true;
 
-    let lastSeen = Date.now();
-    try {
-      const raw = localStorage.getItem(LAST_SEEN_KEY);
-      if (raw) lastSeen = Number(raw) || Date.now();
-    } catch {
-      /* ignore storage errors */
-    }
-    localStorage.setItem(LAST_SEEN_KEY, String(Date.now()));
+    let lastSeen = readLastSeen();
+    writeLastSeen();
 
     const now = Date.now();
     const awayMs = Math.max(0, now - lastSeen);
@@ -1233,19 +874,11 @@ export function ObservatoryProvider({ children }: { children: ReactNode }) {
   // Persist lastSeen periodically so the next session can compute away-time.
   useEffect(() => {
     const id = window.setInterval(() => {
-      try {
-        localStorage.setItem(LAST_SEEN_KEY, String(Date.now()));
-      } catch {
-        /* ignore storage errors */
-      }
+      writeLastSeen();
     }, 30_000);
     return () => {
       window.clearInterval(id);
-      try {
-        localStorage.setItem(LAST_SEEN_KEY, String(Date.now()));
-      } catch {
-        /* ignore storage errors */
-      }
+      writeLastSeen();
     };
   }, []);
 
@@ -1306,12 +939,7 @@ export function ObservatoryProvider({ children }: { children: ReactNode }) {
       if (!current) return current;
       const trimmed = name.trim().slice(0, 24) || displayCreatureName(current.id);
       const next = { ...current, name: trimmed };
-      try {
-        localStorage.setItem(CREATURE_KEY, JSON.stringify(next));
-        localStorage.setItem(NAME_KEY, trimmed); // backward-compat
-      } catch {
-        /* ignore storage errors */
-      }
+      persistCreature(next);
       return next;
     });
   }, []);
@@ -1323,13 +951,8 @@ export function ObservatoryProvider({ children }: { children: ReactNode }) {
     setCreature(next);
     setProgress(fresh);
     progressRef.current = fresh;
-    try {
-      localStorage.setItem(CREATURE_KEY, JSON.stringify(next));
-      localStorage.setItem(NAME_KEY, next.name);
-      persistProgress(fresh);
-    } catch {
-      /* ignore storage errors */
-    }
+    persistCreature(next);
+    persistProgress(fresh);
     const nextEconomy = {
       ...economyRef.current,
       ownedPets: economyRef.current.ownedPets.includes(id)
@@ -1360,11 +983,7 @@ export function ObservatoryProvider({ children }: { children: ReactNode }) {
     };
     setSettings(clean);
     setModeState(clean.defaultMode);
-    try {
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify(clean));
-    } catch {
-      /* ignore storage errors */
-    }
+    saveSettings(clean);
   }, []);
 
   const testConnection = useCallback(async (password: string) => {
@@ -1546,12 +1165,7 @@ export function ObservatoryProvider({ children }: { children: ReactNode }) {
     };
     creatureRef.current = next;
     setCreature(next);
-    try {
-      localStorage.setItem(CREATURE_KEY, JSON.stringify(next));
-      localStorage.setItem(NAME_KEY, next.name);
-    } catch {
-      /* ignore storage errors */
-    }
+    persistCreature(next);
     if (!careByPetRef.current[petId]) {
       const freshCare = createCareStats();
       const nextCare = { ...careByPetRef.current, [petId]: freshCare };
@@ -1856,11 +1470,7 @@ export function ObservatoryProvider({ children }: { children: ReactNode }) {
     const next: CreatureSave = { ...current, evolutionPath: path };
     creatureRef.current = next;
     setCreature(next);
-    try {
-      localStorage.setItem(CREATURE_KEY, JSON.stringify(next));
-    } catch {
-      /* ignore storage errors */
-    }
+    persistCreature(next);
     pushActivity([{
       id: makeActivityId(Date.now()),
       at: Date.now(),
@@ -2077,11 +1687,7 @@ export function ObservatoryProvider({ children }: { children: ReactNode }) {
     if (!bossSaveRef.current[bossId]?.unlocked) return;
     activeBossIdRef.current = bossId;
     setActiveBossIdState(bossId);
-    try {
-      localStorage.setItem(ACTIVE_BOSS_KEY, bossId);
-    } catch {
-      /* ignore storage errors */
-    }
+    persistActiveBossId(bossId);
   }, []);
 
   const startEepsiteVisit = useCallback((eepsiteId: string): boolean => {
@@ -2452,6 +2058,7 @@ export function ObservatoryProvider({ children }: { children: ReactNode }) {
 }
 
 function appendSample(prev: Series, m: RouterMetrics): Series {
+  const HISTORY_LENGTH = 3600;
   const trim = (arr: number[], v: number) => [...arr, v].slice(-HISTORY_LENGTH);
   return {
     inbound: trim(prev.inbound, +(m.inboundBps / (1024 * 1024)).toFixed(2)),

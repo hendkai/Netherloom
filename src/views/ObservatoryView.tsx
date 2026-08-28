@@ -1,11 +1,30 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Heart, Lightbulb, Maximize2, Minus, Play, Plus, Star } from "lucide-react";
 import { NetworkCanvas } from "../NetworkCanvas";
 import { Sparkline, PanelHeader, PanelTitle, Ring } from "../components/ui";
-import { usePetCompositeSprite } from "../components/PetSprite";
+import { usePetCompositeSprite, useVerifiedPetAnimation } from "../components/PetSprite";
+import { type PetAnimationState } from "../lib/petAnimations";
 import { activityBreakdown, healthScore, formatBandwidth, formatNumber } from "../lib/observatory";
 import { useObservatory, type ViewId } from "../state/ObservatoryProvider";
+import type { RouterEvent } from "../lib/routerEvents";
 import { hungerStatus, cleanlinessStatus, funStatus } from "../lib/care";
+
+/** How long a router-event reaction keeps the pet in its event animation (ms). */
+const EVENT_ANIMATION_MS = 2400;
+/** Events older than this (restored from storage, tab was hidden) don't replay animations. */
+const EVENT_ANIMATION_MAX_AGE_MS = 10_000;
+
+const EVENT_ANIMATIONS: Record<RouterEvent["kind"], PetAnimationState> = {
+  connected: "waving",
+  disconnected: "failed",
+  network: "jumping",
+  tunnels: "running",
+  peers: "waving",
+  bandwidth: "jumping",
+  idle: "waiting",
+  restart: "failed",
+  level: "review",
+};
 
 function ActivityLegend() {
   const { metrics, peerCreatures } = useObservatory();
@@ -327,6 +346,7 @@ export function ObservatoryView() {
     equipped,
     reactions,
     peerCreatures,
+    routerEvents,
   } = useObservatory();
   const cardRef = useRef<HTMLDivElement | null>(null);
   const heroComposite = usePetCompositeSprite(
@@ -335,6 +355,24 @@ export function ObservatoryView() {
     progression?.stage.scale ?? 1,
     creatureFilter,
   );
+  const heroAnimation = useVerifiedPetAnimation(creature?.id ?? "");
+
+  // Router events drive the pet's atlas animation: the newest event picks the
+  // matching row for a short window, then the pet settles back into idle.
+  const [eventAnimation, setEventAnimation] = useState<PetAnimationState | null>(null);
+  const newestEventId = routerEvents[0]?.id;
+  useEffect(() => {
+    const event = routerEvents[0];
+    if (!event || !heroAnimation) return;
+    if (Date.now() - event.timestamp > EVENT_ANIMATION_MAX_AGE_MS) return;
+    setEventAnimation(EVENT_ANIMATIONS[event.kind] ?? null);
+    const timer = window.setTimeout(() => setEventAnimation(null), EVENT_ANIMATION_MS);
+    return () => window.clearTimeout(timer);
+    // heroAnimation is stable per species; the newest event id re-triggers the window.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newestEventId, heroAnimation?.src]);
+
+  const heroAnimationState: PetAnimationState = eventAnimation ?? "idle";
 
   const onFullscreen = () => {
     const el = cardRef.current;
@@ -349,8 +387,9 @@ export function ObservatoryView() {
         <NetworkCanvas
           zoom={zoom}
           paused={playback === "Replay"}
-          heroSprite={heroComposite.src}
+          heroSprite={heroAnimation?.src ?? heroComposite.src}
           heroFilter={heroComposite.composed ? "none" : creatureFilter}
+          heroAnimation={heroAnimation ? heroAnimationState : undefined}
           peers={peerCreatures}
         />
         <div className="network-reaction-layer" aria-live="polite">

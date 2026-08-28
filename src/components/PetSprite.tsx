@@ -1,16 +1,53 @@
-import { useEffect, useMemo, useState } from "react";
-import { GEAR_SLOTS, getGearItem, type GearItem, type GearSlot } from "../lib/economy";
-import { petVariantLayer } from "../lib/petVariants";
+import { useEffect, useState } from "react";
+import type { GearSlot } from "../lib/economy";
+import {
+  PET_ATLAS,
+  PET_ANIMATION_ROWS,
+  petAnimationFrameAt,
+  petAnimationSource,
+  type PetAnimationSource,
+  type PetAnimationState,
+} from "../lib/petAnimations";
 import { filterForCreature, spriteForCreature } from "../lib/progression";
+
+/**
+ * Returns the species atlas only after its spritesheet actually loaded. A
+ * species listed in ANIMATED_PET_SPECIES whose .webp is missing (partial
+ * release, cache purge) degrades to the static sprite instead of a broken
+ * image or an empty canvas hero.
+ */
+export function useVerifiedPetAnimation(petId: string): PetAnimationSource | null {
+  const source = petAnimationSource(petId);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    setLoaded(false);
+    if (!source) return;
+    let cancelled = false;
+    const image = new Image();
+    image.onload = () => {
+      if (!cancelled) setLoaded(true);
+    };
+    image.onerror = () => {
+      if (!cancelled) setLoaded(false);
+    };
+    image.src = source.src;
+    return () => {
+      cancelled = true;
+    };
+  }, [source?.src]);
+  return source && loaded ? source : null;
+}
 
 interface PetSpriteProps {
   petId: string;
+  /** Kept for loadout UI compatibility; gear is intentionally not drawn on pets. */
   equipped?: Partial<Record<GearSlot, string>>;
   size: number;
   baseScale?: number;
   filter?: string;
   className?: string;
   alt?: string;
+  animation?: PetAnimationState;
 }
 
 interface CompositeResult {
@@ -18,167 +55,93 @@ interface CompositeResult {
   composed: boolean;
 }
 
-const COMPOSITE_SIZE = 224;
-const imageCache = new Map<string, Promise<HTMLImageElement>>();
-const compositeCache = new Map<string, Promise<string>>();
-
-function loadImage(src: string): Promise<HTMLImageElement> {
-  const cached = imageCache.get(src);
-  if (cached) return cached;
-  const pending = new Promise<HTMLImageElement>((resolve, reject) => {
-    const image = new Image();
-    image.decoding = "async";
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error(`Could not load sprite ${src}`));
-    image.src = src;
-  });
-  imageCache.set(src, pending);
-  return pending;
-}
-
-async function compose(
-  petId: string,
-  equipped: Partial<Record<GearSlot, string>>,
-  baseScale: number,
-  recolor: string,
-): Promise<string> {
-  const layers = GEAR_SLOTS.flatMap((slot) => {
-    const item = getGearItem(equipped[slot]);
-    if (!item) return [];
-    const back = petVariantLayer(petId, item.variantKey, "back");
-    const front = petVariantLayer(petId, item.variantKey, "front");
-    return [{ item, back, front }];
-  });
-  const base = await loadImage(spriteForCreature(petId));
-  const layerImages = await Promise.all(
-    layers.map(async (layer) => ({
-      ...layer,
-      backImage: layer.back ? await loadImage(layer.back) : undefined,
-      frontImage: layer.front ? await loadImage(layer.front) : undefined,
-    })),
-  );
-  const canvas = document.createElement("canvas");
-  canvas.width = COMPOSITE_SIZE;
-  canvas.height = COMPOSITE_SIZE;
-  const context = canvas.getContext("2d");
-  if (!context) return spriteForCreature(petId);
-
-  context.clearRect(0, 0, COMPOSITE_SIZE, COMPOSITE_SIZE);
-  context.imageSmoothingEnabled = false;
-  const safeScale = Math.min(1, baseScale);
-  context.save();
-  context.translate(COMPOSITE_SIZE / 2, COMPOSITE_SIZE * 0.92);
-  context.scale(safeScale, safeScale);
-  context.translate(-COMPOSITE_SIZE / 2, -COMPOSITE_SIZE * 0.92);
-
-  for (const layer of layerImages) {
-    if (layer.backImage) context.drawImage(layer.backImage, 0, 0, COMPOSITE_SIZE, COMPOSITE_SIZE);
-  }
-
-  context.save();
-  context.filter = recolor || "none";
-  context.drawImage(base, 0, 0, COMPOSITE_SIZE, COMPOSITE_SIZE);
-  context.restore();
-
-  for (const layer of layerImages) {
-    if (layer.frontImage) context.drawImage(layer.frontImage, 0, 0, COMPOSITE_SIZE, COMPOSITE_SIZE);
-  }
-
-  context.restore();
-  return canvas.toDataURL("image/png");
-}
-
-function compositeKey(
-  petId: string,
-  equipped: Partial<Record<GearSlot, string>>,
-  baseScale: number,
-  recolor: string,
-): string {
-  const items = GEAR_SLOTS.map((slot) => equipped[slot] ?? "-").join("|");
-  return `${petId}|${items}|${Math.min(1, baseScale).toFixed(3)}|${recolor}`;
-}
-
-function getComposite(
-  petId: string,
-  equipped: Partial<Record<GearSlot, string>>,
-  baseScale: number,
-  recolor: string,
-): Promise<string> {
-  const key = compositeKey(petId, equipped, baseScale, recolor);
-  const cached = compositeCache.get(key);
-  if (cached) return cached;
-  const pending = compose(petId, equipped, baseScale, recolor);
-  compositeCache.set(key, pending);
-  if (compositeCache.size > 256) {
-    const oldest = compositeCache.keys().next().value;
-    if (typeof oldest === "string") compositeCache.delete(oldest);
-  }
-  return pending;
-}
-
+/**
+ * Compatibility hook for the Observatory canvas. Equipment remains part of
+ * progression and stats, but the visual source is always the unmodified pet.
+ */
 export function usePetCompositeSprite(
   petId: string,
-  equipped: Partial<Record<GearSlot, string>> = {},
-  baseScale = 1,
-  filter?: string,
+  _equipped: Partial<Record<GearSlot, string>> = {},
+  _baseScale = 1,
+  _filter?: string,
 ): CompositeResult {
-  const recolor = filter ?? filterForCreature(petId);
-  const fallback = spriteForCreature(petId);
-  const key = useMemo(
-    () => compositeKey(petId, equipped, baseScale, recolor),
-    [petId, equipped, baseScale, recolor],
-  );
-  const [result, setResult] = useState<CompositeResult>({ src: fallback, composed: false });
-
-  useEffect(() => {
-    let cancelled = false;
-    setResult({ src: fallback, composed: false });
-    getComposite(petId, equipped, baseScale, recolor)
-      .then((src) => {
-        if (!cancelled) setResult({ src, composed: true });
-      })
-      .catch(() => {
-        if (!cancelled) setResult({ src: fallback, composed: false });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [key, petId, equipped, baseScale, recolor, fallback]);
-
-  return result;
+  return {
+    src: spriteForCreature(petId),
+    composed: false,
+  };
 }
 
 export function PetSprite({
   petId,
-  equipped = {},
   size,
-  baseScale = 1,
   filter,
   className,
   alt = "",
+  animation = "idle",
 }: PetSpriteProps) {
   const recolor = filter ?? filterForCreature(petId);
-  const composite = usePetCompositeSprite(petId, equipped, baseScale, recolor);
-  const items = GEAR_SLOTS.flatMap((slot) => {
-    const item = getGearItem(equipped[slot]);
-    return item ? [item] : [];
-  });
-  const label = items.length > 0
-    ? `${alt || "Pet"} wearing ${items.map((item: GearItem) => item.name).join(", ")}`
-    : alt;
+  const animated = useVerifiedPetAnimation(petId);
+  const [frame, setFrame] = useState(0);
+  const [reducedMotion, setReducedMotion] = useState(false);
+
+  useEffect(() => {
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => setReducedMotion(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+
+  useEffect(() => {
+    setFrame(0);
+    if (!animated || reducedMotion) return;
+    const durations = PET_ANIMATION_ROWS[animation].durations;
+    let timeout = 0;
+    let current = 0;
+    const advance = () => {
+      timeout = window.setTimeout(() => {
+        current = (current + 1) % durations.length;
+        setFrame(current);
+        advance();
+      }, durations[current]);
+    };
+    advance();
+    return () => window.clearTimeout(timeout);
+  }, [animated?.src, animation, reducedMotion]);
+
+  const atlasFrame = petAnimationFrameAt(animation, 0, reducedMotion);
+  const column = reducedMotion ? atlasFrame.column : frame;
 
   return (
     <span
       className={`pet-sprite${className ? ` ${className}` : ""}`}
       style={{ width: size, height: size }}
-      data-composite={composite.composed ? "ready" : "loading"}
+      data-composite="base"
+      data-animation={animated ? animation : "static"}
     >
-      <img
-        className="pet-sprite-composite"
-        src={composite.src}
-        alt={label}
-        style={{ filter: composite.composed ? "none" : recolor }}
-      />
+      {animated ? (
+        <span className="pet-sprite-atlas-window" role="img" aria-label={alt}>
+          <img
+            className="pet-sprite-atlas"
+            src={animated.src}
+            alt=""
+            aria-hidden="true"
+            style={{
+              filter: recolor,
+              width: `${PET_ATLAS.columns * 100}%`,
+              height: `${PET_ATLAS.rows * 100}%`,
+              transform: `translate(-${column * 100 / PET_ATLAS.columns}%, -${atlasFrame.row * 100 / PET_ATLAS.rows}%)`,
+            }}
+          />
+        </span>
+      ) : (
+        <img
+          className="pet-sprite-composite"
+          src={spriteForCreature(petId)}
+          alt={alt}
+          style={{ filter: recolor }}
+        />
+      )}
     </span>
   );
 }

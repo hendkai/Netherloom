@@ -1,5 +1,10 @@
 import { useEffect, useRef } from "react";
 import { nodes, creatureSprites } from "./data";
+import {
+  PET_ATLAS,
+  petAnimationFrameAt,
+  type PetAnimationState,
+} from "./lib/petAnimations";
 import type { PeerCreature } from "./lib/peers";
 
 type Particle = {
@@ -73,12 +78,14 @@ export function NetworkCanvas({
   paused = false,
   heroSprite,
   heroFilter = "none",
+  heroAnimation,
   peers = [],
 }: {
   zoom?: number;
   paused?: boolean;
   heroSprite?: string;
   heroFilter?: string;
+  heroAnimation?: PetAnimationState;
   peers?: PeerCreature[];
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -86,11 +93,24 @@ export function NetworkCanvas({
   const pausedRef = useRef(paused);
   const heroImgRef = useRef<HTMLImageElement | null>(null);
   const heroFilterRef = useRef(heroFilter);
+  const heroAnimationRef = useRef(heroAnimation);
+  const reducedMotionRef = useRef(false);
   const peersRef = useRef(peers);
   zoomRef.current = zoom;
   pausedRef.current = paused;
   heroFilterRef.current = heroFilter;
+  heroAnimationRef.current = heroAnimation;
   peersRef.current = peers;
+
+  useEffect(() => {
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => {
+      reducedMotionRef.current = query.matches;
+    };
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
 
   useEffect(() => {
     if (!heroSprite) {
@@ -272,10 +292,28 @@ export function NetworkCanvas({
         const image = isHero && heroImgRef.current ? heroImgRef.current : spriteImages.get(dispSprite);
         if (image?.complete && image.naturalWidth > 0) {
           const drawHeight = node.size;
-          const drawWidth = drawHeight * (image.naturalWidth / image.naturalHeight);
+          const animatedHero = isHero ? heroAnimationRef.current : undefined;
+          const drawWidth = animatedHero
+            ? drawHeight * (PET_ATLAS.cellWidth / PET_ATLAS.cellHeight)
+            : drawHeight * (image.naturalWidth / image.naturalHeight);
           ctx.save();
           if (isHero) ctx.filter = heroFilterRef.current;
-          ctx.drawImage(image, node.px - drawWidth / 2, node.py + bob - drawHeight / 2, drawWidth, drawHeight);
+          if (animatedHero) {
+            const frame = petAnimationFrameAt(animatedHero, time, reducedMotionRef.current);
+            ctx.drawImage(
+              image,
+              frame.column * PET_ATLAS.cellWidth,
+              frame.row * PET_ATLAS.cellHeight,
+              PET_ATLAS.cellWidth,
+              PET_ATLAS.cellHeight,
+              node.px - drawWidth / 2,
+              node.py + bob - drawHeight / 2,
+              drawWidth,
+              drawHeight,
+            );
+          } else {
+            ctx.drawImage(image, node.px - drawWidth / 2, node.py + bob - drawHeight / 2, drawWidth, drawHeight);
+          }
           ctx.restore();
         } else {
           ctx.fillStyle = dispColor;
